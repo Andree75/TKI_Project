@@ -1,300 +1,345 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 import math
-from collections import Counter
-from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
+
+# Import modul-modul modular yang sudah kita buat
+from src.preprocessing import clean_text
+from src.engine import (
+    build_inverted_index, calculate_idf, calculate_tfidf_matrix,
+    vectorize_query, compute_cosine_similarity, compute_dot_product
+)
+from src.evaluation import calculate_all_metrics
 
 # ====================================================================
-# CONFIG & PAGE SETUP
+# 1. KONFIGURASI HALAMAN & ESTETIKA (PREMIUM UI)
 # ====================================================================
 st.set_page_config(page_title="IR Mini Search Engine", page_icon="🔍", layout="wide")
 
 st.markdown("""
-    <div style="padding: 20px; border: 2px solid #4CAF50; border-radius: 10px; background-color: #f9f9f9; text-align: center; font-family: 'Segoe UI', sans-serif;">
-        <h2 style="color: #2E7D32; margin-bottom: 5px;">Tugas Temu Kembali Informasi (TKI) - GUI Streamlit</h2>
-        <p style="margin: 0;"><b>Andri Darmawan</b> (301210004) & <b>Muhammad Fakhrudin</b> (3012310043)</p>
-        <hr style="border: 1px solid #4CAF50; width: 30%; margin: 10px auto;">
-    </div>
+<style>
+    /* Styling Premium Aesthetic */
+    .title-box {
+        padding: 30px; 
+        border: 2px solid #4CAF50; 
+        border-radius: 15px; 
+        background: linear-gradient(135deg, #ffffff, #e8f5e9); 
+        text-align: center; 
+        font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif;
+        box-shadow: 0 4px 15px rgba(46,125,50,0.15);
+        margin-bottom: 30px;
+    }
+    .title-box h1 {
+        color: #2E7D32; 
+        margin-bottom: 10px;
+        font-weight: 800;
+        font-size: 2.5rem;
+    }
+    .title-box p {
+        font-size: 1.2rem;
+        color: #555;
+    }
+    .doc-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 6px solid #4CAF50;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .doc-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(46,125,50,0.15);
+    }
+    .score-badge {
+        background-color: #E8F5E9;
+        color: #2E7D32;
+        padding: 6px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.9em;
+        border: 1px solid #4CAF50;
+    }
+    .report-card {
+        background-color: #FAFAFA;
+        padding: 25px;
+        border-radius: 10px;
+        border: 1px solid #E0E0E0;
+        margin-bottom: 20px;
+    }
+</style>
+<div class="title-box">
+    <h1>Mesin Pencari TKI - Ketahanan Pangan 🌾</h1>
+    <p>Dikembangkan oleh <b>Andri Darmawan</b> (301210004) & <b>Muhammad Fakhrudin</b> (3012310043)</p>
+</div>
 """, unsafe_allow_html=True)
 
+
 # ====================================================================
-# CORE FUNCTIONS & PREPROCESSING (CACHED FOR PERFORMANCE)
+# 2. DATA LOADING & PIPELINE ENGINE (CACHED)
 # ====================================================================
-@st.cache_resource
-def init_sastrawi():
-    stemmer = StemmerFactory().create_stemmer()
-    stopwords = set(StopWordRemoverFactory().get_stop_words())
-    return stemmer, stopwords
-
-stemmer, stopwords = init_sastrawi()
-
-def cleaning(teks):
-    teks = str(teks).lower()
-    teks = re.sub(r'\d+', ' ', teks)
-    teks = re.sub(r'[^a-z\s]', ' ', teks)
-    teks = re.sub(r'\s+', ' ', teks).strip()
-    return teks
-
-def tokenisasi(teks):
-    return [t for t in str(teks).split() if len(t) > 1]
-
-def hapus_stopword(tokens):
-    return [k for k in tokens if k not in stopwords]
-
-def stemming(tokens):
-    return [stemmer.stem(k) for k in tokens]
-
 @st.cache_data
-def load_and_index_dataset():
-    # Load dataset dari link GitHub kamu
-    url_data = 'https://github.com/muhfakhrudin/Tugas_TKI/raw/refs/heads/main/data_ketahanan_pangan_clean.xlsx'
-    df = pd.read_excel(url_data)
-    df.columns = ['Komentar', 'Sumber']
-    df = df.dropna(subset=['Komentar']).reset_index(drop=True)
-    
-    # Preprocessing
-    df['hasil_cleaning'] = [cleaning(t) for t in df['Komentar']]
-    df['hasil_token'] = [tokenisasi(t) for t in df['hasil_cleaning']]
-    df['hasil_stopword'] = [hapus_stopword(t) for t in df['hasil_token']]
-    df['hasil_stemming'] = [stemming(t) for t in df['hasil_stopword']]
-    df['teks_bersih'] = df['hasil_stemming'].apply(lambda x: ' '.join(x) if x else 'kosong')
-    
-    # Membangun Inverted Index
-    inverted_index = {}
-    for doc_id, tokens in enumerate(df['hasil_stemming']):
-        hitung_kata = Counter(tokens)
-        for term, tf_mentah in hitung_kata.items():
-            if term not in inverted_index:
-                inverted_index[term] = {}
-            inverted_index[term][doc_id] = tf_mentah
-            
-    # Parameter VSM
-    kosakata_vsm = sorted(list(inverted_index.keys()))
-    dimensi_kata = len(kosakata_vsm)
-    indeks_kata = {kata: i for i, kata in enumerate(kosakata_vsm)}
-    
-    N_docs = len(df)
-    global_idf = {kata: math.log10(N_docs / len(posting)) for kata, posting in inverted_index.items()}
-    
-    # Membangun Matriks TF-IDF Kustom
-    matriks_tfidf_kustom = np.zeros((N_docs, dimensi_kata))
-    for kata, posting in inverted_index.items():
-        kata_idx = indeks_kata[kata]
-        idf_w = global_idf[kata]
-        for doc_id, tf_mentah in posting.items():
-            tf_log = 1 + math.log10(tf_mentah) if tf_mentah > 0 else 0
-            matriks_tfidf_kustom[doc_id, kata_idx] = tf_log * idf_w
-            
-    return df, inverted_index, matriks_tfidf_kustom, global_idf, indeks_kata, dimensi_kata, N_docs
+def load_data():
+    """Memuat data langsung dari file lokal hasil_vsm_ketahanan_pangan.xlsx"""
+    try:
+        df = pd.read_excel('hasil_vsm_ketahanan_pangan.xlsx')
+        if len(df.columns) >= 2:
+            df.columns = ['Komentar', 'Sumber'] + list(df.columns[2:])
+        else:
+            df.columns = ['Komentar']
+        df = df.dropna(subset=['Komentar']).reset_index(drop=True)
+        return df
+    except Exception as e:
+        st.error(f"Gagal memuat file Excel: {e}")
+        return pd.DataFrame({'Komentar': []})
 
-df, inverted_index, matriks_tfidf_kustom, global_idf, indeks_kata, dimensi_kata, N_docs = load_and_index_dataset()
-
-# Helper untuk hitung metrik evaluasi
-def hitung_metrik(retrieved, ground_truth):
-    retrieved_set = set(retrieved)
-    gt_set = set(ground_truth)
-    relevan_terpanggil = retrieved_set.intersection(gt_set)
+@st.cache_resource
+def prepare_search_engine(documents):
+    """Membangun index, IDF, dan Matriks TF-IDF secara efisien"""
+    if not documents:
+        return {}, {}, {}, np.array([]), []
+        
+    total_docs = len(documents)
+    # 1. Bangun Inverted Index
+    inverted_index, df_dict, processed_docs = build_inverted_index(documents)
+    # 2. Hitung IDF Weights
+    idf_weights = calculate_idf(df_dict, total_docs)
+    # 3. Hitung Matriks TF-IDF
+    doc_matrix, vocab = calculate_tfidf_matrix(inverted_index, idf_weights, total_docs)
     
-    precision = len(relevan_terpanggil) / len(retrieved_set) if len(retrieved_set) > 0 else 0
-    recall = len(relevan_terpanggil) / len(gt_set) if len(gt_set) > 0 else 0
-    f_measure = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    return precision * 100, recall * 100, f_measure * 100
+    return inverted_index, df_dict, idf_weights, doc_matrix, vocab
+
+# --- Menjalankan Pipeline ---
+df = load_data()
+documents = df['Komentar'].astype(str).tolist()
+
+with st.spinner('Menyiapkan Engine Pencarian (Pre-processing, TF-IDF, Inverted Index)...'):
+    inverted_index, df_dict, idf_weights, doc_matrix, vocab = prepare_search_engine(documents)
+
 
 # ====================================================================
-# INTERFACE NAVIGATION USING TABS
+# 3. ANTARMUKA PENGGUNA (2 TAB UTAMA)
 # ====================================================================
-tab1, tab2 = st.tabs(["🔍 Nomor 1: Mini Search Engine", "📊 Nomor 2: Tugas Analisis & Evaluasi"])
+tab1, tab2 = st.tabs(["🔍 Mesin Pencari", "📊 Laporan Analisis"])
 
 # --------------------------------------------------------------------
-# TAB 1: MINI SEARCH ENGINE
+# TAB 1: 🔍 MESIN PENCARI
 # --------------------------------------------------------------------
 with tab1:
-    st.header("Pengembangan Mesin Pencari Mini")
+    st.markdown("### 🔎 Cari Dokumen Relevan")
+    col1, col2 = st.columns([2, 1])
     
-    # Input Kueri
-    query_input = st.text_input("Masukkan kueri pencarian Anda:", placeholder="Contoh: harga beras murah stabil")
-    top_k = st.slider("Jumlah Dokumen Teratas (Top-K):", min_value=1, max_value=10, value=5)
+    with col1:
+        query = st.text_input("Masukkan Kueri Pencarian:", placeholder="Contoh: harga beras stabil murah")
     
-    if query_input:
-        # Proses kueri
-        q_clean = cleaning(query_input)
-        q_tokens = tokenisasi(q_clean)
-        q_stop = hapus_stopword(q_tokens)
-        q_stem = stemming(q_stop)
-        
-        st.write(f"**Hasil Preprocessing Kueri:** `{q_stem}`")
-        
-        # Vektor Kueri
-        q_counts = Counter(q_stem)
-        vektor_query = np.zeros(dimensi_kata)
-        for kata, tf_mentah in q_counts.items():
-            if kata in indeks_kata:
-                vektor_query[indeks_kata[kata]] = (1 + math.log10(tf_mentah)) * global_idf[kata]
-        
-        # Kalkulasi Skor Jarak
-        skor_tanpa_norm = np.dot(matriks_tfidf_kustom, vektor_query)
-        norm_query = np.linalg.norm(vektor_query)
-        norm_dokumen = np.linalg.norm(matriks_tfidf_kustom, axis=1)
-        norm_dokumen[norm_dokumen == 0] = 1.0
-        skor_cosine = skor_tanpa_norm / (norm_query * norm_dokumen) if norm_query > 0 else np.zeros(N_docs)
-        
-        # Pengurutan Ranking
-        urutan_cosine = skor_cosine.argsort()[::-1][:top_k]
-        urutan_tanpa_norm = skor_tanpa_norm.argsort()[::-1][:top_k]
-        
-        # Tampilan Komparatif Berdampingan (Menjawab kebutuhan visual analisis)
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🟢 Dengan Cosine Normalization")
-            for rank, idx in enumerate(urutan_cosine, 1):
-                if skor_cosine[idx] > 0:
-                    with st.expander(f"Rank #{rank} | ID: {idx} | Skor: {skor_cosine[idx]:.4f}"):
-                        st.write(df['Komentar'].iloc[idx])
-                        st.caption(f"Sumber: {df['Sumber'].iloc[idx]}")
-                        
-        with col2:
-            st.subheader("🔴 Tanpa Normalisasi (Dot Product)")
-            for rank, idx in enumerate(urutan_tanpa_norm, 1):
-                if skor_tanpa_norm[idx] > 0:
-                    with st.expander(f"Rank #{rank} | ID: {idx} | Skor: {skor_tanpa_norm[idx]:.4f}"):
-                        st.write(df['Komentar'].iloc[idx])
-                        st.caption(f"Sumber: {df['Sumber'].iloc[idx]}")
+    with col2:
+        top_k = st.slider("Jumlah Hasil (Top-K):", min_value=1, max_value=15, value=5)
+        # Checkbox opsional untuk Analisis 2b
+        use_dot_product = st.checkbox("Gunakan Dot Product (Tanpa Normalisasi)", 
+                                      help="Menghilangkan Cosine Normalization untuk melihat efek Length Bias. (Lihat analisis lengkap di Tab Laporan)")
+
+    if query:
+        with st.spinner('Menghitung Skor Kemiripan...'):
+            q_vector = vectorize_query(query, vocab, idf_weights)
+            
+            if use_dot_product:
+                scores = compute_dot_product(doc_matrix, q_vector)
+                score_label = "Dot Product Score"
+            else:
+                scores = compute_cosine_similarity(doc_matrix, q_vector)
+                score_label = "Cosine Similarity"
+            
+            ranked_indices = scores.argsort()[::-1][:top_k]
+            chart_data = {"Dokumen": [], "Skor": []}
+
+            st.markdown("---")
+            st.markdown("### 🏆 Hasil Pencarian Peringkat Teratas")
+            
+            found = False
+            for rank, idx in enumerate(ranked_indices, start=1):
+                skor_dokumen = scores[idx]
+                if skor_dokumen > 0:
+                    found = True
+                    teks_asli = df['Komentar'].iloc[idx]
+                    sumber = df.get('Sumber', pd.Series(['-'] * len(df))).iloc[idx]
+                    
+                    chart_data["Dokumen"].append(f"Doc {idx}")
+                    chart_data["Skor"].append(skor_dokumen)
+                    
+                    st.markdown(f"""
+                        <div class="doc-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <h4 style="margin: 0; color: #2E7D32;">Peringkat #{rank} | Dokumen ID: {idx}</h4>
+                                <span class="score-badge">{score_label}: {skor_dokumen:.4f}</span>
+                            </div>
+                            <p style="font-size: 1.1em; line-height: 1.5; color: #444;">"{teks_asli}"</p>
+                            <small style="color: #888;"><b>Sumber:</b> {sumber}</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+            
+            if not found:
+                st.warning("Tidak ditemukan dokumen yang relevan dengan kueri Anda.")
+            else:
+                st.markdown("### 📊 Perbandingan Skor Dokumen (Visualisasi)")
+                df_chart = pd.DataFrame(chart_data).set_index("Dokumen")
+                st.bar_chart(df_chart, use_container_width=True, color="#4CAF50")
+
 
 # --------------------------------------------------------------------
-# TAB 2: TUGAS ANALISIS & LAPORAN
+# TAB 2: 📊 LAPORAN ANALISIS TEORI (SOAL UTS)
 # --------------------------------------------------------------------
 with tab2:
-    st.header("Laporan Analisis & Evaluasi Sistem")
+    st.header("Laporan Analisis & Teori UTS")
+    st.markdown("Halaman ini menyajikan analisis teori interaktif untuk menjawab soal laporan evaluasi UTS.")
     
-    # --- SUBBAGIAN 2A ---
-    st.subheader("2a. Analisis Bobot (IDF)")
-    col_a1, col_a2 = st.columns([1, 2])
-    with col_a1:
-        kata_pilihan = st.selectbox("Pilih kata untuk simulasi hitung IDF manual:", ["pangan", "upaya", "beras", "stabil"])
-        df_kata = len(inverted_index.get(kata_pilihan, {}))
-        idf_kata = math.log10(50 / df_kata) if df_kata > 0 else 0
+    # --- BAGIAN 1: Kalkulator IDF Interaktif (Soal 2a) ---
+    st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
+    st.subheader("Bagian 1: Kalkulator IDF Interaktif (Soal 2a)")
+    st.write("Masukkan dua kata kunci untuk menghitung nilai *Inverse Document Frequency* (IDF) secara dinamis dan membandingkan bobotnya.")
+    
+    col_input1, col_input2 = st.columns(2)
+    with col_input1:
+        kata_1_raw = st.text_input("Kata Kunci Pertama [A]:", value="beras")
+    with col_input2:
+        kata_2_raw = st.text_input("Kata Kunci Kedua [B]:", value="stabil")
         
-        st.metric(label=f"Document Frequency (df) '{kata_pilihan}'", value=df_kata)
-        st.latex(r"IDF = \log_{10}\left(\frac{50}{" + str(df_kata) + r"}\right) = " + f"{idf_kata:.4f}")
-        
-    with col_a2:
-        st.markdown(r"""
-        **Mengapa kata yang lebih jarang muncul memiliki bobot lebih tinggi?**
-        
-        Secara matematis, nilai $df$ berada sebagai penyebut dalam logaritma pembagian variabel total dokumen ($\log_{10}(N/df)$). 
-        * Jika kata sangat umum (seperti *'pangan'*, $df=25$), pembagi bernilai besar sehingga nilai rasio mengecil mendekati angka 1 ($\log_{10}(2) \approx 0.3010$). Kata ini kehilangan daya pembeda informasi.
-        * Jika kata sangat langka (seperti *'upaya'*, $df=1$), rasio pembagian menjadi sangat besar ($\log_{10}(50) \approx 1.6990$). VSM memberikan penghargaan tinggi pada istilah spesifik ini karena membawa nilai informasi (*information gain*) unik yang membantu membedakan satu dokumen dengan dokumen lainnya.
-        """)
-        
+    # Pre-processing kata agar seragam dengan vocabulary Inverted Index (stemming Sastrawi & lowercasing)
+    kata_1_clean = clean_text(kata_1_raw).strip()
+    kata_2_clean = clean_text(kata_2_raw).strip()
+    
+    # Ambil kata pertama saja jika user memasukkan lebih dari satu kata
+    kata_1 = kata_1_clean.split()[0] if kata_1_clean else ""
+    kata_2 = kata_2_clean.split()[0] if kata_2_clean else ""
+    
+    N_docs = 50 # Sesuai ketentuan di soal UTS
+    
+    # Ekstraksi Frekuensi Dokumen (df) dari memori sistem
+    df_1 = df_dict.get(kata_1, 0) if kata_1 else 0
+    df_2 = df_dict.get(kata_2, 0) if kata_2 else 0
+    
+    # Kalkulasi IDF
+    idf_1 = math.log10(N_docs / df_1) if df_1 > 0 else 0.0
+    idf_2 = math.log10(N_docs / df_2) if df_2 > 0 else 0.0
+    
+    # Fungsi pembantu untuk merender rumus LaTeX
+    def render_idf_latex(kata, df, idf):
+        if not kata:
+            return
+        if df == 0:
+            st.warning(f"Kata tidak ditemukan dalam database dokumen ($df = 0$).")
+            return
+            
+        ratio = N_docs / df
+        st.latex(rf"\text{{IDF}}(\text{{{kata}}}) = \log_{{10}}\left(\frac{{{N_docs}}}{{{df}}}\right)")
+        st.latex(rf"\text{{IDF}}(\text{{{kata}}}) = \log_{{10}}({ratio:.4f})")
+        st.latex(rf"\text{{Hasil}} = {idf:.4f}")
+
     st.markdown("---")
+    col_res1, col_res2 = st.columns(2)
+    with col_res1:
+        st.markdown(f"**Perhitungan Kata [A]: '{kata_1_raw}'** *(Stem: {kata_1})*")
+        st.write(f"- Total Dokumen ($N$): **{N_docs}**")
+        st.write(f"- Frekuensi Dokumen ($df$): **{df_1}**")
+        render_idf_latex(kata_1, df_1, idf_1)
+        
+    with col_res2:
+        st.markdown(f"**Perhitungan Kata [B]: '{kata_2_raw}'** *(Stem: {kata_2})*")
+        st.write(f"- Total Dokumen ($N$): **{N_docs}**")
+        st.write(f"- Frekuensi Dokumen ($df$): **{df_2}**")
+        render_idf_latex(kata_2, df_2, idf_2)
+        
+    # --- Kesimpulan Otomatis ---
+    st.markdown("##### 💡 Kesimpulan Analisis Otomatis")
+    if not kata_1 or not kata_2:
+        st.info("Silakan masukkan kedua kata untuk melihat analisis perbandingan otomatis.")
+    elif df_1 == 0 or df_2 == 0:
+        st.info("Salah satu atau kedua kata tidak dikenali oleh sistem (df=0), sehingga perbandingan tidak dapat dilakukan.")
+    elif idf_1 == idf_2:
+        st.success(f"Kata **'{kata_1_raw}'** dan **'{kata_2_raw}'** memiliki nilai IDF yang sama persis karena keduanya muncul di jumlah dokumen yang sama ($df = {df_1}$). Keduanya memberikan bobot informasi yang seimbang.")
+    else:
+        # Menentukan kata mana yang lebih tinggi IDF-nya
+        if idf_1 > idf_2:
+            kata_tinggi, kata_rendah = kata_1_raw, kata_2_raw
+        else:
+            kata_tinggi, kata_rendah = kata_2_raw, kata_1_raw
+            
+        st.success(f"Kata **[{kata_tinggi}]** memiliki IDF lebih tinggi daripada **[{kata_rendah}]** karena muncul di lebih sedikit dokumen, yang membuktikan secara matematis bahwa semakin unik sebuah kata, semakin tinggi bobot informasinya dalam membedakan konteks dokumen.")
+        
+    st.markdown("""</div>""", unsafe_allow_html=True)
     
-    # --- SUBBAGIAN 2B ---
-    st.subheader("2b. Analisis Efek Normalisasi")
-    st.markdown(r"""
-    **Mengapa dokumen panjang memiliki skor lebih tinggi jika tidak dinormalisasi?**
     
-    1. **Length Bias:** Dokumen panjang memiliki kuantitas kata yang melimpah secara natural, memperbesar frekuensi kemunculan term ($tf$) mentah di dalamnya.
-    2. **Akumulasi Dot Product:** Tanpa pembagian dengan panjang vektor ($\|\vec{D}\|$), perhitungan skor hanya mengandalkan $\sum (w_{t,Q} \times w_{t,D})$. Akibatnya, dokumen panjang diuntungkan secara tidak adil karena nilai penjumlahan bobotnya yang terus membengkak secara kuantitas kata, bukan karena kualitas kepadatan topiknya.
-    3. **Solusi Cosine Normalization:** Metode ini membagi perkalian tersebut dengan norma Euclidean sehingga seluruh vektor dokumen diproyeksikan pada radius ruang bernilai sama (= 1). Dokumen pendek yang padat isi informasi relevan akhirnya dapat bersaing secara objektif dengan dokumen panjang yang bertele-tele.
+    # --- BAGIAN 2: Analisis Efek Normalisasi (Untuk soal 2b) ---
+    st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
+    st.subheader("Bagian 2: Analisis Efek Normalisasi (Soal 2b)")
+    
+    st.markdown("""
+    **Analisis Fenomena *Length Bias* (Dot Product vs Cosine Normalization)**
+    
+    Berdasarkan teori *Vector Space Model* (VSM), perhitungan kemiripan kueri terhadap dokumen dapat dilakukan melalui Perkalian Titik (*Dot Product*). Namun, perhitungan **Dot Product murni memiliki kelemahan yang disebut *Length Bias***.
+    
+    Dokumen teks yang panjang secara natural memiliki kuantitas kata yang lebih banyak, yang akan memperbesar nilai kemunculan kata (*tf*) di dalam dokumen tersebut. Akibatnya, dokumen panjang akan secara otomatis memperoleh skor kemiripan (dot product) yang jauh lebih tinggi secara kuantitas, padahal isi kontennya belum tentu lebih relevan secara kualitas dibanding dokumen yang lebih pendek.
+    
+    **Solusi: Cosine Normalization**
+    Untuk menetralisir efek *Length Bias* ini, kita membagi hasil *Dot Product* dengan perkalian panjang (norma Euclidean) dari vektor Dokumen dan vektor Kueri:
     """)
     
-    st.markdown("---")
+    st.latex(r"\text{Cosine Similarity} = \frac{\vec{D} \cdot \vec{Q}}{||\vec{D}|| \times ||\vec{Q}||}")
     
-    # --- SUBBAGIAN 2C ---
-    st.subheader("2c. Evaluasi Sistem Dinamis")
-    # Fungsi pembantu internal untuk memproses pencarian per skenario kueri
-    def proses_retrieval_eval(query_text):
-        if not query_text:
-            return []
-        q_clean = cleaning(query_text)
-        q_tokens = tokenisasi(q_clean)
-        q_stop = hapus_stopword(q_tokens)
-        q_stem = stemming(q_stop)
+    st.markdown("""
+    Melalui pembagian norma ini, seluruh vektor dokumen diproyeksikan (dinormalisasi) ke dalam radius sudut yang sama (vektor unit = 1). Dampaknya, **dokumen pendek yang isinya padat, sangat spesifik, dan tepat sasaran** dapat memenangkan peringkat (ranking) dan bersaing secara adil melawan dokumen panjang yang mungkin banyak mengandung kata-kata tidak relevan.
+    """)
+    
+    st.info("""
+    👉 **BUKTIKAN SECARA LANGSUNG!** 
+    Silakan menuju **Tab 1: 🔍 Mesin Pencari**, masukkan kueri kalimat utuh, lalu aktifkan kotak centang (*checkbox*) **"Gunakan Dot Product (Tanpa Normalisasi)"**. Anda akan langsung melihat bagaimana susunan peringkat dokumen dan besaran nilai skornya (*Dot Product vs Cosine*) berubah secara drastis!
+    """)
+    st.markdown("""</div>""", unsafe_allow_html=True)
+    
+    
+    # --- BAGIAN 3: Evaluasi Sistem Dinamis (Untuk soal 2c) ---
+    st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
+    st.subheader("Bagian 3: Kalkulator Evaluasi Sistem (Soal 2c)")
+    st.write("Uji performa mesin pencari menggunakan Ground Truth. (Telah terhubung dengan modul `src.evaluation`)")
+    
+    col_eval1, col_eval2 = st.columns(2)
+    with col_eval1:
+        st.markdown("**Skenario 1**")
+        query_1 = st.text_input("Kueri 1:", value="harga beras murah")
+        gt_1 = st.text_input("Ground Truth (Pisahkan dengan koma):", value="22, 41", key="gt1")
         
-        q_counts = Counter(q_stem)
-        vektor_query = np.zeros(dimensi_kata)
-        for kata, tf_mentah in q_counts.items():
-            if kata in indeks_kata:
-                vektor_query[indeks_kata[kata]] = (1 + math.log10(tf_mentah)) * global_idf[kata]
-                
-        skor_tanpa_norm = np.dot(matriks_tfidf_kustom, vektor_query)
-        norm_query = np.linalg.norm(vektor_query)
-        norm_dokumen = np.linalg.norm(matriks_tfidf_kustom, axis=1)
-        norm_dokumen[norm_dokumen == 0] = 1.0
-        skor_cosine = skor_tanpa_norm / (norm_query * norm_dokumen) if norm_query > 0 else np.zeros(N_docs)
-        return [int(idx) for idx in skor_cosine.argsort()[::-1] if skor_cosine[idx] > 0][:5]
-
-    # Membuat layout 2 kolom berdampingan untuk Skenario 1 dan Skenario 2
-    col_sken1, col_sken2 = st.columns(2)
-
-    # --- COLUMN KIRI: SKENARIO PENGUJIAN 1 ---
-    with col_sken1:
-        st.markdown("#### Skenario Pengujian 1")
-        eval_query_1 = st.text_input("Masukkan Kueri Pengujian 1:", value="harga beras murah", key="eq1")
-        top_retrieved_1 = proses_retrieval_eval(eval_query_1)
+    with col_eval2:
+        st.markdown("**Skenario 2**")
+        query_2 = st.text_input("Kueri 2:", value="harga beras tidak stabil")
+        gt_2 = st.text_input("Ground Truth (Pisahkan dengan koma):", value="4, 19", key="gt2")
         
-        if eval_query_1:
-            st.write(f"**ID Terpanggil oleh Sistem (Kueri 1):** `{top_retrieved_1}`")
-            for idx in top_retrieved_1:
-                st.text(f" [{idx}] {df['Komentar'].iloc[idx][:65]}...")
+    if st.button("Hitung Evaluasi Matriks", use_container_width=True):
+        eval_results = []
         
-        gt_input_1 = st.text_input("Masukkan ID Ground Truth Kueri 1:", value="22, 41", key="gt1")
-
-    # --- COLUMN KANAN: SKENARIO PENGUJIAN 2 ---
-    with col_sken2:
-        st.markdown("#### Skenario Pengujian 2")
-        eval_query_2 = st.text_input("Masukkan Kueri Pengujian 2:", value="harga beras tidak stabil", key="eq2")
-        top_retrieved_2 = proses_retrieval_eval(eval_query_2)
+        def jalankan_skenario(q, gt_str, skenario_nama):
+            if not q or not gt_str: return None
+            q_vec = vectorize_query(q, vocab, idf_weights)
+            scores = compute_cosine_similarity(doc_matrix, q_vec)
+            retrieved_ids = [int(idx) for idx in scores.argsort()[::-1] if scores[idx] > 0][:5]
+            gt_ids = [int(x.strip()) for x in gt_str.split(',') if x.strip().isdigit()]
+            metrics = calculate_all_metrics(retrieved_ids, gt_ids)
+            return {
+                "Skenario": skenario_nama,
+                "Kueri": q,
+                "Retrieved (Top 5)": str(retrieved_ids),
+                "Ground Truth": str(gt_ids),
+                "Precision": f"{metrics['precision']:.1f}%",
+                "Recall": f"{metrics['recall']:.1f}%",
+                "F-Measure": f"{metrics['f_measure']:.1f}%"
+            }
+            
+        hasil_1 = jalankan_skenario(query_1, gt_1, "Skenario 1")
+        hasil_2 = jalankan_skenario(query_2, gt_2, "Skenario 2")
         
-        if eval_query_2:
-            st.write(f"**ID Terpanggil oleh Sistem (Kueri 2):** `{top_retrieved_2}`")
-            for idx in top_retrieved_2:
-                st.text(f" [{idx}] {df['Komentar'].iloc[idx][:65]}...")
+        if hasil_1: eval_results.append(hasil_1)
+        if hasil_2: eval_results.append(hasil_2)
         
-        gt_input_2 = st.text_input("Masukkan ID Ground Truth Kueri 2:", value="4, 19", key="gt2")
-
-    st.markdown("---")
-
-    # --- PERHITUNGAN & REKAPITULASI TABEL OTOMATIS ---
-    st.write("#### Tabel Indikator Performa Akhir (Real-time Update)")
-
-    rekap_data = []
-
-    # Hitung metrik Skenario 1 jika input tersedia
-    if eval_query_1 and gt_input_1:
-        gt_list_1 = [int(x.strip()) for x in gt_input_1.split(",") if x.strip().isdigit()]
-        p1, r1, f1 = hitung_metrik(top_retrieved_1, gt_list_1)
-        rekap_data.append({
-            "No": 1, 
-            "Kueri": eval_query_1, 
-            "Retrieved IDs": str(top_retrieved_1),
-            "Ground Truth": str(gt_list_1), 
-            "Precision": f"{p1:.1f}%", 
-            "Recall": f"{r1:.1f}%", 
-            "F1-Score": f"{f1:.1f}%"
-        })
-
-    # Hitung metrik Skenario 2 jika input tersedia
-    if eval_query_2 and gt_input_2:
-        gt_list_2 = [int(x.strip()) for x in gt_input_2.split(",") if x.strip().isdigit()]
-        p2, r2, f2 = hitung_metrik(top_retrieved_2, gt_list_2)
-        rekap_data.append({
-            "No": 2, 
-            "Kueri": eval_query_2, 
-            "Retrieved IDs": str(top_retrieved_2),
-            "Ground Truth": str(gt_list_2), 
-            "Precision": f"{p2:.1f}%", 
-            "Recall": f"{r2:.1f}%", 
-            "F1-Score": f"{f2:.1f}%"
-        })
-
-    # Tampilkan ke dalam dataframe Streamlit jika data sudah siap
-    if rekap_data:
-        df_rekap_final = pd.DataFrame(rekap_data)
-        st.dataframe(df_rekap_final, use_container_width=True)
-    else:
-        st.info("Silakan lengkapi input kueri dan Ground Truth di atas untuk memunculkan tabel indikator akhir.")
+        if eval_results:
+            st.dataframe(pd.DataFrame(eval_results), use_container_width=True)
+            st.success("Tabel Evaluasi berhasil di-*generate*!")
+    st.markdown("""</div>""", unsafe_allow_html=True)
