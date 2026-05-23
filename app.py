@@ -121,7 +121,7 @@ with st.spinner('Menyiapkan Engine Pencarian (Pre-processing, TF-IDF, Inverted I
 # ====================================================================
 # 3. ANTARMUKA PENGGUNA (2 TAB UTAMA)
 # ====================================================================
-tab1, tab2 = st.tabs(["🔍 Mesin Pencari", "📊 Laporan Analisis"])
+tab1, tab2 = st.tabs(["🔍 Mesin Pencari", " Laporan Analisis"])
 
 # --------------------------------------------------------------------
 # TAB 1: 🔍 MESIN PENCARI
@@ -154,7 +154,7 @@ with tab1:
             chart_data = {"Dokumen": [], "Skor": []}
 
             st.markdown("---")
-            st.markdown("### 🏆 Hasil Pencarian Peringkat Teratas")
+            st.markdown("### Hasil Pencarian Peringkat Teratas")
             
             found = False
             for rank, idx in enumerate(ranked_indices, start=1):
@@ -181,13 +181,13 @@ with tab1:
             if not found:
                 st.warning("Tidak ditemukan dokumen yang relevan dengan kueri Anda.")
             else:
-                st.markdown("### 📊 Perbandingan Skor Dokumen (Visualisasi)")
+                st.markdown("### Perbandingan Skor Dokumen (Visualisasi)")
                 df_chart = pd.DataFrame(chart_data).set_index("Dokumen")
                 st.bar_chart(df_chart, use_container_width=True, color="#4CAF50")
 
 
 # --------------------------------------------------------------------
-# TAB 2: 📊 LAPORAN ANALISIS TEORI (SOAL UTS)
+# TAB 2: LAPORAN ANALISIS TEORI (SOAL UTS)
 # --------------------------------------------------------------------
 with tab2:
     st.header("Laporan Analisis & Teori UTS")
@@ -250,7 +250,7 @@ with tab2:
         render_idf_latex(kata_2, df_2, idf_2)
         
     # --- Kesimpulan Otomatis ---
-    st.markdown("##### 💡 Kesimpulan Analisis Otomatis")
+    st.markdown("##### Kesimpulan Analisis Otomatis")
     if not kata_1 or not kata_2:
         st.info("Silakan masukkan kedua kata untuk melihat analisis perbandingan otomatis.")
     elif df_1 == 0 or df_2 == 0:
@@ -291,7 +291,7 @@ with tab2:
     """)
     
     st.info("""
-    👉 **BUKTIKAN SECARA LANGSUNG!** 
+    **BUKTIKAN SECARA LANGSUNG!** 
     Silakan menuju **Tab 1: 🔍 Mesin Pencari**, masukkan kueri kalimat utuh, lalu aktifkan kotak centang (*checkbox*) **"Gunakan Dot Product (Tanpa Normalisasi)"**. Anda akan langsung melihat bagaimana susunan peringkat dokumen dan besaran nilai skornya (*Dot Product vs Cosine*) berubah secara drastis!
     """)
     st.markdown("""</div>""", unsafe_allow_html=True)
@@ -300,46 +300,102 @@ with tab2:
     # --- BAGIAN 3: Evaluasi Sistem Dinamis (Untuk soal 2c) ---
     st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
     st.subheader("Bagian 3: Kalkulator Evaluasi Sistem (Soal 2c)")
-    st.write("Uji performa mesin pencari menggunakan Ground Truth. (Telah terhubung dengan modul `src.evaluation`)")
+    st.write("Mekanisme Evaluasi: Ketik Kueri terlebih dahulu untuk melihat dokumen yang dipanggil oleh sistem, kemudian tentukan Ground Truth berdasarkan hasil tersebut.")
     
+    # Fungsi pembantu lokal untuk menjalankan pencarian kustom pada menu evaluasi
+    def jalankan_retrieval_eval(q_text):
+        if not q_text:
+            return []
+        q_vec = vectorize_query(q_text, vocab, idf_weights)
+        scores = compute_cosine_similarity(doc_matrix, q_vec)
+        # Mengembalikan list ID dokumen teratas dengan skor > 0 (Maksimal 5 dokumen)
+        return [int(idx) for idx in scores.argsort()[::-1] if scores[idx] > 0][:5]
+
+    # Membuat layout 2 kolom untuk Skenario 1 dan Skenario 2
     col_eval1, col_eval2 = st.columns(2)
+    
+    # --- KOLOM KIRI: SKENARIO 1 ---
     with col_eval1:
-        st.markdown("**Skenario 1**")
-        query_1 = st.text_input("Kueri 1:", value="harga beras murah")
-        gt_1 = st.text_input("Ground Truth (Pisahkan dengan koma):", value="22, 41", key="gt1")
+        st.markdown("#### Skenario Pengujian 1")
+        query_1 = st.text_input("Masukkan Kueri 1:", value="harga beras murah", key="q1_eval")
         
-    with col_eval2:
-        st.markdown("**Skenario 2**")
-        query_2 = st.text_input("Kueri 2:", value="harga beras tidak stabil")
-        gt_2 = st.text_input("Ground Truth (Pisahkan dengan koma):", value="4, 19", key="gt2")
-        
-    if st.button("Hitung Evaluasi Matriks", use_container_width=True):
-        eval_results = []
-        
-        def jalankan_skenario(q, gt_str, skenario_nama):
-            if not q or not gt_str: return None
-            q_vec = vectorize_query(q, vocab, idf_weights)
-            scores = compute_cosine_similarity(doc_matrix, q_vec)
-            retrieved_ids = [int(idx) for idx in scores.argsort()[::-1] if scores[idx] > 0][:5]
-            gt_ids = [int(x.strip()) for x in gt_str.split(',') if x.strip().isdigit()]
-            metrics = calculate_all_metrics(retrieved_ids, gt_ids)
-            return {
-                "Skenario": skenario_nama,
-                "Kueri": q,
-                "Retrieved (Top 5)": str(retrieved_ids),
-                "Ground Truth": str(gt_ids),
-                "Precision": f"{metrics['precision']:.1f}%",
-                "Recall": f"{metrics['recall']:.1f}%",
-                "F-Measure": f"{metrics['f_measure']:.1f}%"
-            }
+        top_retrieved_1 = []
+        if query_1:
+            # 1. Menampilkan output dokumen sistem terlebih dahulu
+            top_retrieved_1 = jalankan_retrieval_eval(query_1)
+            st.success(f"**[Sistem] ID Terpanggil:** `{top_retrieved_1}`")
             
-        hasil_1 = jalankan_skenario(query_1, gt_1, "Skenario 1")
-        hasil_2 = jalankan_skenario(query_2, gt_2, "Skenario 2")
+            st.write("**Pratinjau Dokumen Terpanggil:**")
+            for idx in top_retrieved_1:
+                st.markdown(f"- **[ID {idx}]** \"{df['Komentar'].iloc[idx][:80]}...\"")
+            
+            st.markdown("---")
+            # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
+            gt_1 = st.text_input("Masukkan Ground Truth Kueri 1 (pisahkan dengan koma):", value="22, 41", key="gt1_eval")
+        else:
+            gt_1 = ""
+
+    # --- KOLOM KANAN: SKENARIO 2 ---
+    with col_eval2:
+        st.markdown("#### Skenario Pengujian 2")
+        query_2 = st.text_input("Masukkan Kueri 2:", value="harga beras tidak stabil", key="q2_eval")
         
-        if hasil_1: eval_results.append(hasil_1)
-        if hasil_2: eval_results.append(hasil_2)
-        
-        if eval_results:
-            st.dataframe(pd.DataFrame(eval_results), use_container_width=True)
-            st.success("Tabel Evaluasi berhasil di-*generate*!")
+        top_retrieved_2 = []
+        if query_2:
+            # 1. Menampilkan output dokumen sistem terlebih dahulu
+            top_retrieved_2 = jalankan_retrieval_eval(query_2)
+            st.success(f"**[Sistem] ID Terpanggil:** `{top_retrieved_2}`")
+            
+            st.write("**Pratinjau Dokumen Terpanggil:**")
+            for idx in top_retrieved_2:
+                st.markdown(f"- **[ID {idx}]** \"{df['Komentar'].iloc[idx][:80]}...\"")
+            
+            st.markdown("---")
+            # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
+            gt_2 = st.text_input("Masukkan Ground Truth Kueri 2 (pisahkan dengan koma):", value="4, 19", key="gt2_eval")
+        else:
+            gt_2 = ""
+
+    st.markdown("---")
+    
+    # Tombol kalkulasi akhir menggunakan matriks evaluasi
+    if query_1 and query_2:
+        if st.button("Hitung Evaluasi Matriks", use_container_width=True):
+            eval_results = []
+            
+            # Memproses metrik skenario 1
+            if gt_1:
+                gt_ids_1 = [int(x.strip()) for x in gt_1.split(',') if x.strip().isdigit()]
+                metrics_1 = calculate_all_metrics(top_retrieved_1, gt_ids_1)
+                eval_results.append({
+                    "Skenario": "Skenario 1",
+                    "Kueri": query_1,
+                    "Retrieved (Top 5)": str(top_retrieved_1),
+                    "Ground Truth": str(gt_ids_1),
+                    "Precision": f"{metrics_1['precision']:.1f}%",
+                    "Recall": f"{metrics_1['recall']:.1f}%",
+                    "F-Measure": f"{metrics_1['f_measure']:.1f}%"
+                })
+                
+            # Memproses metrik skenario 2
+            if gt_2:
+                gt_ids_2 = [int(x.strip()) for x in gt_2.split(',') if x.strip().isdigit()]
+                metrics_2 = calculate_all_metrics(top_retrieved_2, gt_ids_2)
+                eval_results.append({
+                    "Skenario": "Skenario 2",
+                    "Kueri": query_2,
+                    "Retrieved (Top 5)": str(top_retrieved_2),
+                    "Ground Truth": str(gt_ids_2),
+                    "Precision": f"{metrics_2['precision']:.1f}%",
+                    "Recall": f"{metrics_2['recall']:.1f}%",
+                    "F-Measure": f"{metrics_2['f_measure']:.1f}%"
+                })
+                
+            if eval_results:
+                st.markdown("#### 📊 Tabel Indikator Akurasi Hasil Akhir")
+                st.dataframe(pd.DataFrame(eval_results), use_container_width=True)
+                st.success("Tabel evaluasi performa berhasil diperbarui!")
+    else:
+        st.info("Silakan lengkapi Kueri Skenario 1 dan Kueri Skenario 2 terlebih dahulu.")
+
     st.markdown("""</div>""", unsafe_allow_html=True)
