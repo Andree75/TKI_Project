@@ -392,7 +392,7 @@ with tab2:
                 })
                 
             if eval_results:
-                st.markdown("#### 📊 Tabel Indikator Akurasi Hasil Akhir")
+                st.markdown("#### Tabel Indikator Akurasi Hasil Akhir")
                 st.dataframe(pd.DataFrame(eval_results), use_container_width=True)
                 st.success("Tabel evaluasi performa berhasil diperbarui!")
     else:
