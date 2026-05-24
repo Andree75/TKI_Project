@@ -331,14 +331,14 @@ with tab2:
             
             st.markdown("---")
             # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
-            gt_1 = st.text_input("Masukkan Ground Truth Kueri 1 (pisahkan dengan koma):", value="22, 41", key="gt1_eval")
+            gt_1 = st.text_input("Masukkan Ground Truth Kueri 1 (pisahkan dengan koma):", value="22, 41, 10, 5, 2", key="gt1_eval")
         else:
             gt_1 = ""
 
     # --- KOLOM KANAN: SKENARIO 2 ---
     with col_eval2:
         st.markdown("#### Skenario Pengujian 2")
-        query_2 = st.text_input("Masukkan Kueri 2:", value="harga beras tidak stabil", key="q2_eval")
+        query_2 = st.text_input("Masukkan Kueri 2:", value="stabilitas pasokan", key="q2_eval")
         
         top_retrieved_2 = []
         if query_2:
@@ -352,7 +352,7 @@ with tab2:
             
             st.markdown("---")
             # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
-            gt_2 = st.text_input("Masukkan Ground Truth Kueri 2 (pisahkan dengan koma):", value="4, 19", key="gt2_eval")
+            gt_2 = st.text_input("Masukkan Ground Truth Kueri 2 (pisahkan dengan koma):", value="4, 19, 3, 11", key="gt2_eval")
         else:
             gt_2 = ""
 
