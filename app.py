@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import math
 
-# Import modul-modul modular yang sudah kita buat
 from src.preprocessing import clean_text
 from src.engine import (
     build_inverted_index, calculate_idf, calculate_tfidf_matrix,
@@ -11,9 +10,7 @@ from src.engine import (
 )
 from src.evaluation import calculate_all_metrics
 
-# ====================================================================
-# 1. KONFIGURASI HALAMAN & ESTETIKA (PREMIUM UI)
-# ====================================================================
+# 1. KONFIGURASI HALAMAN & ESTETIKA
 st.set_page_config(page_title="IR Mini Search Engine", page_icon="🔍", layout="wide")
 
 st.markdown("""
@@ -76,9 +73,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ====================================================================
-# 2. DATA LOADING & PIPELINE ENGINE (CACHED)
-# ====================================================================
+# 2. DATA LOADING & PIPELINE ENGINE
 @st.cache_data
 def load_data():
     """Memuat data langsung dari file lokal hasil_vsm_ketahanan_pangan.xlsx"""
@@ -110,7 +105,6 @@ def prepare_search_engine(documents):
     
     return inverted_index, df_dict, idf_weights, doc_matrix, vocab
 
-# --- Menjalankan Pipeline ---
 df = load_data()
 documents = df['Komentar'].astype(str).tolist()
 
@@ -118,16 +112,12 @@ with st.spinner('Menyiapkan Engine Pencarian (Pre-processing, TF-IDF, Inverted I
     inverted_index, df_dict, idf_weights, doc_matrix, vocab = prepare_search_engine(documents)
 
 
-# ====================================================================
 # 3. ANTARMUKA PENGGUNA (2 TAB UTAMA)
-# ====================================================================
-tab1, tab2 = st.tabs(["🔍 Mesin Pencari", " Laporan Analisis"])
+tab1, tab2 = st.tabs(["Mesin Pencari", " Laporan Analisis"])
 
-# --------------------------------------------------------------------
-# TAB 1: 🔍 MESIN PENCARI
-# --------------------------------------------------------------------
+# TAB 1: MESIN PENCARI
 with tab1:
-    st.markdown("### 🔎 Cari Dokumen Relevan")
+    st.markdown("### Cari Dokumen Relevan")
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -186,14 +176,12 @@ with tab1:
                 st.bar_chart(df_chart, use_container_width=True, color="#4CAF50")
 
 
-# --------------------------------------------------------------------
-# TAB 2: LAPORAN ANALISIS TEORI (SOAL UTS)
-# --------------------------------------------------------------------
+# TAB 2: LAPORAN ANALISIS
 with tab2:
-    st.header("Laporan Analisis & Teori UTS")
-    st.markdown("Halaman ini menyajikan analisis teori interaktif untuk menjawab soal laporan evaluasi UTS.")
+    st.header("Laporan Analisis")
+    st.markdown("Halaman analisis teori untuk soal 2a dan 2b.")
     
-    # --- BAGIAN 1: Kalkulator IDF Interaktif (Soal 2a) ---
+    # BAGIAN 1: Kalkulator IDF (Soal 2a)
     st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
     st.subheader("Bagian 1: Kalkulator IDF Interaktif (Soal 2a)")
     st.write("Masukkan dua kata kunci untuk menghitung nilai *Inverse Document Frequency* (IDF) secara dinamis dan membandingkan bobotnya.")
@@ -212,7 +200,7 @@ with tab2:
     kata_1 = kata_1_clean.split()[0] if kata_1_clean else ""
     kata_2 = kata_2_clean.split()[0] if kata_2_clean else ""
     
-    N_docs = 50 # Sesuai ketentuan di soal UTS
+    N_docs = 50 # ambil dari total Dokumen yang ada
     
     # Ekstraksi Frekuensi Dokumen (df) dari memori sistem
     df_1 = df_dict.get(kata_1, 0) if kata_1 else 0
@@ -249,10 +237,10 @@ with tab2:
         st.write(f"- Frekuensi Dokumen ($df$): **{df_2}**")
         render_idf_latex(kata_2, df_2, idf_2)
         
-    # --- Kesimpulan Otomatis ---
-    st.markdown("##### Kesimpulan Analisis Otomatis")
+    # Kesimpulan
+    st.markdown("##### Kesimpulan Hasil Analisis")
     if not kata_1 or not kata_2:
-        st.info("Silakan masukkan kedua kata untuk melihat analisis perbandingan otomatis.")
+        st.info("Silakan masukkan kedua kata untuk melihat analisis perbandingan.")
     elif df_1 == 0 or df_2 == 0:
         st.info("Salah satu atau kedua kata tidak dikenali oleh sistem (df=0), sehingga perbandingan tidak dapat dilakukan.")
     elif idf_1 == idf_2:
@@ -269,7 +257,7 @@ with tab2:
     st.markdown("""</div>""", unsafe_allow_html=True)
     
     
-    # --- BAGIAN 2: Analisis Efek Normalisasi (Untuk soal 2b) ---
+    # BAGIAN 2: Analisis Efek Normalisasi (soal 2b) 
     st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
     st.subheader("Bagian 2: Analisis Efek Normalisasi (Soal 2b)")
     
@@ -291,13 +279,13 @@ with tab2:
     """)
     
     st.info("""
-    **BUKTIKAN SECARA LANGSUNG!** 
-    Silakan menuju **Tab 1: 🔍 Mesin Pencari**, masukkan kueri kalimat utuh, lalu aktifkan kotak centang (*checkbox*) **"Gunakan Dot Product (Tanpa Normalisasi)"**. Anda akan langsung melihat bagaimana susunan peringkat dokumen dan besaran nilai skornya (*Dot Product vs Cosine*) berubah secara drastis!
+    **Lakukan Uji Pembuktian** 
+    Silakan menuju **Tab 1: Mesin Pencari**, masukkan kueri kalimat utuh, lalu aktifkan kotak centang (*checkbox*) **"Gunakan Dot Product (Tanpa Normalisasi)"**. Anda akan langsung melihat bagaimana susunan peringkat dokumen dan besaran nilai skornya (*Dot Product vs Cosine*) berubah secara drastis!
     """)
     st.markdown("""</div>""", unsafe_allow_html=True)
     
     
-    # --- BAGIAN 3: Evaluasi Sistem Dinamis (Untuk soal 2c) ---
+    # BAGIAN 3: Evaluasi Sistem Dinamis (soal 2c)
     st.markdown("""<div class="report-card">""", unsafe_allow_html=True)
     st.subheader("Bagian 3: Kalkulator Evaluasi Sistem (Soal 2c)")
     st.write("Mekanisme Evaluasi: Ketik Kueri terlebih dahulu untuk melihat dokumen yang dipanggil oleh sistem, kemudian tentukan Ground Truth berdasarkan hasil tersebut.")
@@ -314,7 +302,7 @@ with tab2:
     # Membuat layout 2 kolom untuk Skenario 1 dan Skenario 2
     col_eval1, col_eval2 = st.columns(2)
     
-    # --- KOLOM KIRI: SKENARIO 1 ---
+    # KOLOM KIRI: SKENARIO 1 
     with col_eval1:
         st.markdown("#### Skenario Pengujian 1")
         query_1 = st.text_input("Masukkan Kueri 1:", value="harga beras murah", key="q1_eval")
@@ -331,11 +319,11 @@ with tab2:
             
             st.markdown("---")
             # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
-            gt_1 = st.text_input("Masukkan Ground Truth Kueri 1 (pisahkan dengan koma):", value="22, 41, 10, 5, 2", key="gt1_eval")
+            gt_1 = st.text_input("Masukkan Ground Truth Kueri 1 (pisahkan dengan koma):", value="26, 41", key="gt1_eval")
         else:
             gt_1 = ""
 
-    # --- KOLOM KANAN: SKENARIO 2 ---
+    # KOLOM KANAN: SKENARIO 2
     with col_eval2:
         st.markdown("#### Skenario Pengujian 2")
         query_2 = st.text_input("Masukkan Kueri 2:", value="stabilitas pasokan", key="q2_eval")
@@ -352,7 +340,7 @@ with tab2:
             
             st.markdown("---")
             # 2. Input Ground Truth baru muncul/diisi setelah melihat output di atas
-            gt_2 = st.text_input("Masukkan Ground Truth Kueri 2 (pisahkan dengan koma):", value="4, 19, 3, 11", key="gt2_eval")
+            gt_2 = st.text_input("Masukkan Ground Truth Kueri 2 (pisahkan dengan koma):", value="3", key="gt2_eval")
         else:
             gt_2 = ""
 
